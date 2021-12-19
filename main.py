@@ -1,26 +1,38 @@
-#!/bin/python3
-import flask
-import urllib.parse
+from flask import Flask,request,redirect,Response
 import requests
 
 
-app = flask.Flask(__name__)
-domain_cache = {"localhost":{"ip":"127.0.0.1", "protocol":"http", "port":8080}}  # domain:port
-domains = ["localhost"]
+app = Flask(__name__)
 
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def handle_request(path):
-    domain = urllib.parse.urlparse(flask.request.base_url).hostname
-    if domain in domains:
-        response = requests.get("{}://{}:{}/{}".format(domain_cache[domain]['protocol'], domain_cache[domain]['ip'], domain_cache[domain]['port'], path), stream=True)
-        resp = response
-        return resp.raw.read(), resp.status_code, resp.headers.items()
-    else:
-        return flask.abort(404)
+config = {"domain.com":"https://127.0.0.1:5623"}   # domain.com is hosted internally at 127.0.0.1:5623
 
 
 
-app.run()
+@app.route("/<path:path>", methods=["GET", "POST", "DELETE"])
+def route(path):
+    req_host = request.headers['Host']
+    try:
+        location = config[req_host]
+    except KeyError:
+        return "Not found", 404
+    return request_to(location, path, method=request.method)
 
+def request_to(location, path, method="GET"):
+    if request.method=="GET":
+        resp = requests.get("{}/{}".format(location, path))
+        excluded_headers = ["content-encoding", "content-length", "transfer-encoding", "connection"]
+        headers = [(name, value) for (name, value) in  resp.raw.headers.items() if name.lower() not in excluded_headers]
+        response = Response(resp.content, resp.status_code, headers)
+        return response
+    elif request.method=="POST":
+        resp = requests.post("{}/{}".format(location, path),json=request.get_json())
+        excluded_headers = ["content-encoding", "content-length", "transfer-encoding", "connection"]
+        headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
+        response = Response(resp.content, resp.status_code, headers)
+        return response
+    elif request.method=="DELETE":
+        resp = requests.delete("{}/{}".format(location, path)).content
+        response = Response(resp.content, resp.status_code, headers)
+        return response
+    
